@@ -1,0 +1,80 @@
+version: '3'
+
+services:
+  db:
+    image: postgres:alpine
+    #restart: always
+    volumes:
+      - ./db:/var/lib/postgresql/data:Z
+    env_file:
+      - db.env
+    networks:
+      - internal
+
+  redis:
+    image: redis:alpine
+    #restart: always
+    networks:
+      - internal
+
+  app:
+    image: nextcloud:fpm-alpine
+    #restart: always
+    volumes:
+      - ./nextcloud-server:/var/www/html:z
+      # NOTE: The `volumes` config of the `cron` and `app` containers must match
+    environment:
+      - POSTGRES_HOST=db
+      - REDIS_HOST=redis
+    env_file:
+      - db.env
+    depends_on:
+      - db
+      - redis
+    networks:
+      - proxy
+      - internal
+
+  web:
+    image: nginx:alpine
+    #restart: always
+    ports:
+      - 80
+    volumes:
+      - ./nextcloud-server:/var/www/html:z,ro
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nextcloud.rule=Host(`nextcloud.localhost`)"
+      - "traefik.http.routers.nextcloud.entrypoints=web"
+      - "traefik.http.services.nextcloud.loadbalancer.server.port=80"
+      - "traefik.docker.network=proxy"
+    networks:
+      - proxy
+      - internal
+
+  cron:
+    image: nextcloud:fpm-alpine
+    #restart: always
+    volumes:
+      - ./nextcloud-server:/var/www/html:z
+      # NOTE: The `volumes` config of the `cron` and `app` containers must match
+    entrypoint: /cron.sh
+    depends_on:
+      - db
+      - redis
+    networks:
+      - internal
+
+volumes:
+  db:
+  nextcloud:
+  
+networks:
+  proxy:
+    external:
+      name: proxy
+  internal:
+    driver: bridge
